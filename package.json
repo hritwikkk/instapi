@@ -1,11 +1,9 @@
 {
-  "name": "insta-api-final",
+  "name": "insta-api",
   "version": "1.0.0",
-  "scripts": {
-    "vercel-build": "echo 'No build step needed for API only'"
-  },
+  "main": "api/info.js",
   "dependencies": {
-    "axios": "^1.6.0",
-    "mongodb": "^6.3.0"
+    "axios": "1.6.2",
+    "mongodb": "6.3.0"
   }
 }
