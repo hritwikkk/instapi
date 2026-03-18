@@ -2,15 +2,17 @@ const { MongoClient } = require('mongodb');
 const axios = require('axios');
 
 const uri = process.env.MONGODB_URI;
-// Create the client outside the handler to reuse the connection
 const client = new MongoClient(uri);
 
 async function getInstaName(username) {
     try {
         const url = `https://www.instagram.com/${username}/`;
-        const { data } = await axios.get(url, {
+        // Added a common User-Agent and a timeout
+        const { data } = await axios({
+            method: 'get',
+            url: url,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/110.0.0.0 Safari/537.36' },
-            timeout: 5000 // 5 second timeout to prevent hanging
+            timeout: 5000
         });
         const nameMatch = data.match(/<meta property="og:title" content="(.*?) \(@/);
         return nameMatch ? nameMatch[1] : username;
@@ -20,38 +22,37 @@ async function getInstaName(username) {
 }
 
 module.exports = async (req, res) => {
+    // Standard Vercel Headers for CORS (allows you to use this API anywhere)
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET');
+
     const { key, username } = req.query;
 
     if (!username || !key) {
-        return res.status(400).json({ error: "Missing key or username parameters" });
+        return res.status(400).json({ error: "Missing key or username" });
     }
 
     try {
-        // Connect to MongoDB
         await client.connect();
         const db = client.db("insta_data");
         const collection = db.collection("users");
 
-        // 1. Check Cache
         const cachedUser = await collection.findOne({ "result.username": username });
         if (cachedUser) {
-            const { _id, ...data } = cachedUser;
-            return res.status(200).json(data);
+            const { _id, ...cleanData } = cachedUser;
+            return res.status(200).json(cleanData);
         }
 
-        // 2. Fetch External Data
         const [keysRes, citiesRes] = await Promise.all([
             axios.get(process.env.PASTEBIN_URL),
             axios.get(process.env.CITIES_JSON_URL)
         ]);
 
-        // 3. Validation
         const keys = keysRes.data.split('\n').map(k => k.trim());
         if (!keys.includes(key)) {
             return res.status(401).json({ error: "Invalid API Key" });
         }
 
-        // 4. Generate Results
         const realName = await getInstaName(username);
         const cityData = citiesRes.data;
         const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
@@ -73,15 +74,11 @@ module.exports = async (req, res) => {
             "Owner": "@oguwave"
         };
 
-        // 5. Save and Return
         await collection.insertOne({ ...responseData });
         return res.status(200).json(responseData);
 
     } catch (error) {
-        console.error("Error details:", error.message);
-        return res.status(500).json({ 
-            error: "Internal Server Error", 
-            message: error.message 
-        });
+        return res.status(500).json({ error: "Server Error", message: error.message });
     }
 };
+    
