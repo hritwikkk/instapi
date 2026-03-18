@@ -8,23 +8,32 @@ async function getInstaName(username) {
     try {
         const url = `https://www.instagram.com/${username}/`;
         const res = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/110.0.0.0 Safari/537.36' },
-            timeout: 5000
+            headers: { 
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9'
+            },
+            timeout: 2500 // Don't wait more than 2.5 seconds
         });
+        
+        if (!res.ok) return username; // If blocked, just use username
+
         const data = await res.text();
         const nameMatch = data.match(/<meta property="og:title" content="(.*?) \(@/);
         return nameMatch ? nameMatch[1] : username;
     } catch (e) {
+        // If Instagram blocks us (SSL Error 80), return the username instead of crashing
         return username;
     }
 }
 
 module.exports = async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
+
     const { key, username } = req.query;
 
     if (!username || !key) {
-        return res.status(400).json({ error: "Missing key or username" });
+        return res.status(400).json({ error: "Missing parameters" });
     }
 
     try {
@@ -38,21 +47,21 @@ module.exports = async (req, res) => {
             return res.status(200).json(cleanData);
         }
 
-        // Fetch Pastebins
-        const keysResponse = await fetch(process.env.PASTEBIN_URL);
-        const keysText = await keysResponse.text();
-        const keys = keysText.split('\n').map(k => k.trim());
+        // Fetch Pastebin Data
+        const [keysRes, citiesRes] = await Promise.all([
+            fetch(process.env.PASTEBIN_URL).then(r => r.text()),
+            fetch(process.env.CITIES_JSON_URL).then(r => r.json())
+        ]);
 
+        const keys = keysRes.split('\n').map(k => k.trim());
         if (!keys.includes(key)) {
             return res.status(401).json({ error: "Invalid API Key" });
         }
 
-        const citiesResponse = await fetch(process.env.CITIES_JSON_URL);
-        const cityData = await citiesResponse.json();
-
+        // Get Real Name (will fallback to username if Instagram blocks Vercel)
         const realName = await getInstaName(username);
-        const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
         
+        const randomCity = citiesRes[Math.floor(Math.random() * citiesRes.length)];
         const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
         const remaining = Math.floor(100000000 + Math.random() * 899999999).toString();
         
@@ -74,7 +83,10 @@ module.exports = async (req, res) => {
         return res.status(200).json(responseData);
 
     } catch (error) {
-        return res.status(500).json({ error: "Server Error", message: error.message });
+        return res.status(500).json({ 
+            error: "Server Error", 
+            message: "Check your Environment Variables or MongoDB Access" 
+        });
     }
 };
-                        
+    
