@@ -38,16 +38,14 @@ module.exports = async (req, res) => {
         const db = client.db("insta_data");
         const collection = db.collection("users");
 
-        // IMPORTANT: Create the Auto-Delete Index (Runs only once)
-        // This deletes documents 15 days (1296000 seconds) after 'createdAt'
-        await collection.createIndex({ "createdAt": 1 }, { expireAfterSeconds: 1296000 });
-
+        // 1. Check Cache first
         const cachedUser = await collection.findOne({ "result.username": username });
         if (cachedUser) {
             const { _id, createdAt, ...cleanData } = cachedUser;
             return res.status(200).json(cleanData);
         }
 
+        // 2. Fetch External Data (Pastebin)
         const [keysText, cityData] = await Promise.all([
             fetch(process.env.PASTEBIN_URL).then(r => r.text()),
             fetch(process.env.CITIES_JSON_URL).then(r => r.json())
@@ -58,6 +56,7 @@ module.exports = async (req, res) => {
             return res.status(401).json({ error: "Invalid API Key" });
         }
 
+        // 3. Generate New Result
         const realName = await getInstaName(username);
         const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
         const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
@@ -75,72 +74,19 @@ module.exports = async (req, res) => {
                 "account_name": realName
             },
             "Owner": "@oguwave",
-            "createdAt": new Date() // This starts the 15-day timer
+            "createdAt": new Date() 
         };
 
+        // 4. Save to DB & Set TTL Index (15 days = 1296000 seconds)
         await collection.insertOne(responseData);
-        
-        // Remove internal fields before sending response
+        await collection.createIndex({ "createdAt": 1 }, { expireAfterSeconds: 1296000 });
+
+        // 5. Send Clean Response
         const { _id, createdAt, ...finalResponse } = responseData;
         return res.status(200).json(finalResponse);
 
     } catch (error) {
-        return res.status(500).json({ error: "Server Error" });
+        console.error(error);
+        return res.status(500).json({ error: "Server Error", message: error.message });
     }
 };
-    }
-
-    try {
-        await client.connect();
-        const db = client.db("insta_data");
-        const collection = db.collection("users");
-
-        const cachedUser = await collection.findOne({ "result.username": username });
-        if (cachedUser) {
-            const { _id, ...cleanData } = cachedUser;
-            return res.status(200).json(cleanData);
-        }
-
-        // Fetch Pastebin Data
-        const [keysRes, citiesRes] = await Promise.all([
-            fetch(process.env.PASTEBIN_URL).then(r => r.text()),
-            fetch(process.env.CITIES_JSON_URL).then(r => r.json())
-        ]);
-
-        const keys = keysRes.split('\n').map(k => k.trim());
-        if (!keys.includes(key)) {
-            return res.status(401).json({ error: "Invalid API Key" });
-        }
-
-        // Get Real Name (will fallback to username if Instagram blocks Vercel)
-        const realName = await getInstaName(username);
-        
-        const randomCity = citiesRes[Math.floor(Math.random() * citiesRes.length)];
-        const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
-        const remaining = Math.floor(100000000 + Math.random() * 899999999).toString();
-        
-        const responseData = {
-            "API BY": "@oguwave",
-            "result": {
-                "country": "India",
-                "city": randomCity.city || "Delhi",
-                "telephone": "+91" + firstDigit + remaining,
-                "username": username,
-                "email": `${username}@gmail.com`,
-                "account_id": Math.floor(100000000 + Math.random() * 900000000).toString(),
-                "account_name": realName
-            },
-            "Owner": "@oguwave"
-        };
-
-        await collection.insertOne({ ...responseData });
-        return res.status(200).json(responseData);
-
-    } catch (error) {
-        return res.status(500).json({ 
-            error: "Server Error", 
-            message: "Check your Environment Variables or MongoDB Access" 
-        });
-    }
-};
-    
