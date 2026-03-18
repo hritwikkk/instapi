@@ -1,5 +1,5 @@
 const { MongoClient } = require('mongodb');
-const axios = require('axios');
+const fetch = require('node-fetch');
 
 const uri = process.env.MONGODB_URI;
 const client = new MongoClient(uri);
@@ -7,13 +7,11 @@ const client = new MongoClient(uri);
 async function getInstaName(username) {
     try {
         const url = `https://www.instagram.com/${username}/`;
-        // Added a common User-Agent and a timeout
-        const { data } = await axios({
-            method: 'get',
-            url: url,
+        const res = await fetch(url, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/110.0.0.0 Safari/537.36' },
             timeout: 5000
         });
+        const data = await res.text();
         const nameMatch = data.match(/<meta property="og:title" content="(.*?) \(@/);
         return nameMatch ? nameMatch[1] : username;
     } catch (e) {
@@ -22,10 +20,7 @@ async function getInstaName(username) {
 }
 
 module.exports = async (req, res) => {
-    // Standard Vercel Headers for CORS (allows you to use this API anywhere)
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET');
-
     const { key, username } = req.query;
 
     if (!username || !key) {
@@ -43,18 +38,19 @@ module.exports = async (req, res) => {
             return res.status(200).json(cleanData);
         }
 
-        const [keysRes, citiesRes] = await Promise.all([
-            axios.get(process.env.PASTEBIN_URL),
-            axios.get(process.env.CITIES_JSON_URL)
-        ]);
+        // Fetch Pastebins
+        const keysResponse = await fetch(process.env.PASTEBIN_URL);
+        const keysText = await keysResponse.text();
+        const keys = keysText.split('\n').map(k => k.trim());
 
-        const keys = keysRes.data.split('\n').map(k => k.trim());
         if (!keys.includes(key)) {
             return res.status(401).json({ error: "Invalid API Key" });
         }
 
+        const citiesResponse = await fetch(process.env.CITIES_JSON_URL);
+        const cityData = await citiesResponse.json();
+
         const realName = await getInstaName(username);
-        const cityData = citiesRes.data;
         const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
         
         const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
@@ -81,4 +77,4 @@ module.exports = async (req, res) => {
         return res.status(500).json({ error: "Server Error", message: error.message });
     }
 };
-    
+                        
