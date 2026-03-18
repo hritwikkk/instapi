@@ -8,7 +8,7 @@ async function getInstaName(username) {
     try {
         const url = `https://www.instagram.com/${username}/`;
         const { data } = await axios.get(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/91.0.4472.124 Safari/537.36' }
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/110.0.0.0 Safari/537.36' }
         });
         const nameMatch = data.match(/<meta property="og:title" content="(.*?) \(@/);
         return nameMatch ? nameMatch[1] : username;
@@ -27,27 +27,32 @@ export default async function handler(req, res) {
         const db = client.db("insta_data");
         const collection = db.collection("users");
 
+        // 1. Check if username was already generated and saved
         const cachedUser = await collection.findOne({ "result.username": username });
         if (cachedUser) {
-            delete cachedUser._id; 
-            return res.status(200).json(cachedUser);
+            const { _id, ...dataWithoutId } = cachedUser;
+            return res.status(200).json(dataWithoutId);
         }
 
+        // 2. Fetch Keys and City JSON from your Pastebins
         const [keysRes, citiesRes] = await Promise.all([
             axios.get(process.env.PASTEBIN_URL),
             axios.get(process.env.CITIES_JSON_URL)
         ]);
 
+        // 3. Key Validation
         const keys = keysRes.data.split('\n').map(k => k.trim());
-        if (!keys.includes(key)) return res.status(401).json({ error: "Invalid Key" });
+        if (!keys.includes(key)) return res.status(401).json({ error: "Invalid API Key" });
 
+        // 4. Generate Random Data
         const realName = await getInstaName(username);
-        const cityData = citiesRes.data;
+        const cityData = citiesRes.data; 
         const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
         
+        // Random Phone (Starts with 6, 7, 8, or 9)
         const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
-        const remainingDigits = Math.floor(100000000 + Math.random() * 899999999).toString();
-        const randomPhone = "+91" + firstDigit + remainingDigits;
+        const remaining = Math.floor(100000000 + Math.random() * 899999999).toString();
+        const randomPhone = "+91" + firstDigit + remaining;
 
         const responseData = {
             "API BY": "@oguwave",
@@ -63,12 +68,12 @@ export default async function handler(req, res) {
             "Owner": "@oguwave"
         };
 
-        await collection.insertOne({...responseData});
-        delete responseData._id;
+        // 5. Save to MongoDB so next time it's instant
+        await collection.insertOne({ ...responseData });
 
         return res.status(200).json(responseData);
     } catch (error) {
-        return res.status(500).json({ error: "Internal Error" });
+        return res.status(500).json({ error: "Internal Server Error" });
     }
-          }
-          
+            }
+        
