@@ -30,7 +30,7 @@ module.exports = async (req, res) => {
     const { key, username } = req.query;
 
     if (!username || !key) {
-        return res.status(400).json({ error: "Missing parameters" });
+        return res.status(400).json({ error: "Missing parameters: key and username are required" });
     }
 
     try {
@@ -38,27 +38,31 @@ module.exports = async (req, res) => {
         const db = client.db("insta_data");
         const collection = db.collection("users");
 
-        // 1. Check Cache first
+        // 1. Check Cache first (If found, we return it immediately)
         const cachedUser = await collection.findOne({ "result.username": username });
         if (cachedUser) {
             const { _id, createdAt, ...cleanData } = cachedUser;
             return res.status(200).json(cleanData);
         }
 
-        // 2. Fetch External Data (Pastebin)
+        // 2. Fetch External Data (Pastebins)
         const [keysText, cityData] = await Promise.all([
             fetch(process.env.PASTEBIN_URL).then(r => r.text()),
             fetch(process.env.CITIES_JSON_URL).then(r => r.json())
         ]);
 
+        // --- THE KEY CHECK IS HERE ---
         const keys = keysText.split('\n').map(k => k.trim());
         if (!keys.includes(key)) {
-            return res.status(401).json({ error: "Invalid API Key" });
+            return res.status(401).json({ error: "Invalid API Key. Access Denied." });
         }
+        // -----------------------------
 
         // 3. Generate New Result
         const realName = await getInstaName(username);
         const randomCity = cityData[Math.floor(Math.random() * cityData.length)];
+        
+        // Phone logic: Start with 6, 7, 8, or 9
         const firstDigit = ["6", "7", "8", "9"][Math.floor(Math.random() * 4)];
         const remaining = Math.floor(100000000 + Math.random() * 899999999).toString();
         
@@ -77,7 +81,7 @@ module.exports = async (req, res) => {
             "createdAt": new Date() 
         };
 
-        // 4. Save to DB & Set TTL Index (15 days = 1296000 seconds)
+        // 4. Save to DB & Set TTL Index (15 days auto-delete)
         await collection.insertOne(responseData);
         await collection.createIndex({ "createdAt": 1 }, { expireAfterSeconds: 1296000 });
 
@@ -86,7 +90,6 @@ module.exports = async (req, res) => {
         return res.status(200).json(finalResponse);
 
     } catch (error) {
-        console.error(error);
         return res.status(500).json({ error: "Server Error", message: error.message });
     }
 };
